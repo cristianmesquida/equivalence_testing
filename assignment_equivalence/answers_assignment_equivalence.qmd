@@ -1,0 +1,352 @@
+---
+title: "Assignment: Classic hypothesis tests and equivalence tests"
+format: html
+execute:
+  echo: false
+  warning: false
+  message: false
+editor: visual
+---
+
+## Introduction
+
+In many research contexts, the goal is not only to determine whether two groups differ, sometimes we want to show that one treatment is better than another. Other times, we want to demonstrate that treatments are similar enough to be considered practically equivalent.
+
+Classic null hypothesis significance testing (NHST) is designed to detect differences, but it is not suited for demonstrating equivalence or non-inferiority. Failing to reject a null hypothesis of "no difference" does not constitute evidence that the groups are equivalent—it simply means we lacked sufficient evidence to conclude they differ. To address this limitation, researchers use specialized approaches: **non-inferiority tests** and **equivalence tests**.
+
+In this assignment, you will:
+
+- Conduct classic hypothesis tests to evaluate differences between groups
+- Perform non-inferiority tests to determine whether a treatment is "not worse by too much"
+- Conduct equivalence tests using the Two One-Sided Tests (TOST) procedure
+- Compare results across different sample sizes to understand the role of statistical power
+- Interpret results in context and draw appropriate conclusions
+
+## Submission Procedure
+
+- **Deadline:** 08-05-2026 (23:59)
+- Submit a reproducible `.Rmd` file named `assignment_equivalence_{student_number}.Rmd`
+- **DO NOT** include your name as the author in the YAML header
+- Ensure the title includes “Assignment Equivalence”
+- Download the folder `assignment_equivalence` from Canvas.
+- Ensure your code is well-organized:
+  - Do not use absolute paths to load the dataset.
+  - Load all required packages at the top of your document. You will work with `tidyverse`, `TOSTER` and `broom`.
+  - Use headings to structure your report clearly.
+  - All code must run without errors when knitted.
+
+::: {.content-visible unless-format="html"}
+```{r}
+#| message: false
+# Load packages
+library(tidyverse)
+library(TOSTER)
+library(broom)
+library(Hmisc)
+
+# theme for plots 
+theme_set(theme_bw())
+```
+
+```{r load_data}
+# Load data
+data <- read.csv("morphine.csv")
+```
+:::
+
+# Part 1: Exploring the data
+
+You will work with a use a real dataset (`morphine.csv`) comparing pain scores between fentanyl and morphine. The dataset contains a unique id from 31 subjects (`subject`), information about which `arm` ("Morphine"or "Fentanyl"), and a series of pain scores measured over time (`a_painscore0:h_painscore120`).
+
+```{r echo=FALSE}
+#| fig-width: 8
+# simplified plot from EH6126_data_analysis_tutorials
+
+pain <- gather(data, time, pain, a_painscore0:h_painscore120) |>
+    mutate(time = as.numeric(gsub("_", "", gsub("[[:alpha:]]", "", time))))
+
+ggplot(pain, aes(x = time, y = pain)) +
+  stat_summary(fun = mean, geom = "line", color = "cornflowerblue", linewidth = 1) +
+  # CI ribbon
+  stat_summary(
+    fun.data = mean_cl_normal,
+    geom = "ribbon",
+    alpha = 0.2,
+    fill = "cornflowerblue") +
+  geom_boxplot(aes(group = time)) +
+  facet_wrap(~arm,) +
+  labs(x = "Minutes post treatment", y = "Pain score") +
+  scale_y_continuous(breaks = seq(0, 10, 2), limits = c(0, 10)) +
+  scale_x_continuous(breaks = c(0, 10, 20, 30, 60, 120))
+
+```
+
+#### Task 1
+
+Before conducting any statistical analysis, explore the variables of interest. We will be looking at the pain score after 120 minutes (`h_painscore120`).
+
+a)  Select the variables will you need for comparing pain scores between treatment arms.
+
+b)  Make a table of descriptive statistics (mean, standard deviation, sample size) for each treatment group.
+
+c)  Make violin or box plot to show the distribution of pain scores 120 minutes after treatment
+
+::: {.content-visible unless-format="html"}
+Answers
+
+```{r}
+# Select columns of interest
+data <- data |>
+  select(subject, arm, h_painscore120) |>
+  mutate(arm = as.factor(arm))
+```
+
+```{r}
+data |> 
+  group_by(arm) |> 
+  summarise(
+    mean = mean(h_painscore120), 
+    standard_dev = sd(h_painscore120), 
+    n = length(h_painscore120)
+          )
+```
+
+```{r}
+ggplot(data, aes(x = arm, y = h_painscore120, fill = arm)) +
+  geom_violin(alpha = 0.3) +
+  geom_boxplot(width = 0.2, alpha = 0.5) +
+  labs(x = "Treatment", 
+       y = "Pain score", 
+       title = "Distributionof pain scores 120 minutes after treatment") 
+
+```
+:::
+
+# Part 2: Testing for a difference
+
+### Task 2:
+
+Test whether there is a difference in pain scores (`h_painscore120`) between fentanyl and morphine.
+
+a)  Fit a linear model using `lm()`
+
+b)  Now conduct a two-sided t-test using `t.test()`.
+
+c)  For both tests report the mean difference (estimate), the t-statistic and their corresponding p-value. What can we conclude based on the reported p-value?
+
+d)  What do you notice when comparing the results from `lm()` and `t.test()`?
+
+::: {.content-visible unless-format="html"}
+Answers
+
+```{r}
+lm_fit <- lm(h_painscore120 ~ arm, data)
+lm_fit |>
+  tidy() |>
+  filter(term == "armMorphine") |>
+  select(estimate, statistic, p.value)
+
+# lm_fit |> 
+#  summary() |> 
+```
+
+```{r}
+
+t.test(h_painscore120 ~ arm, data = data) |> 
+  tidy() |> 
+  select(estimate, statistic, p.value)
+
+res <- t.test(h_painscore120 ~ arm, data = data)
+
+```
+
+Using lm() with a categorical predictor that has two levels is mathematically equivalent to a two-sample t-test for comparing the group means. Both test the same null hypothesis, and they produce almost identical estimates, test statistics and p-values.
+:::
+
+### Task 3:
+
+Now suppose you want to test whether fentanyl results in lower pain scores than morphine. Hint the statistical test should align with this directional hypothesis
+
+a)  Conduct the appropriate test
+
+b)  How does this hypothesis differ from the one you tested in Task 2?
+
+c)  What can you conclude based on the test result?
+
+::: {.content-visible unless-format="html"}
+```{r}
+t.test(h_painscore120 ~ arm,
+       data = data,
+       alternative = "less") 
+```
+:::
+
+::: {.content-visible unless-format="html"}
+Answer: The directionality of hypothesis. The statistical test should be aligned with the hypothesis so a one-sided test should be used.
+:::
+
+::: {.content-visible unless-format="html"}
+Answer: We can reject the null hypothesis that fentanyl pain scores are greater than or equal to morphine pain scores. There is statistically significant evidence that fentanyl leads to lower pain scores than morphine.
+:::
+
+# Part 3: Non-inferiority testing
+
+Next, we will use the TOSTER package to conduct two one-sided tests to evaluate whether morphine is non-inferior to fentanyl. Because fentanyl carries a higher risk of addiction, we are willing to consider an alternative that may be slightly less effective at reducing pain, provided it is not substantially worse.
+
+### Task 4:
+
+Specifically, we define a non-inferiority margin of -1 points on the pain scale. This means we will accept morphine as non-inferior if it is associated with higher pain scores than fentanyl, but by no more than - 1 points.
+
+a.  Conduct a two-one sided t-test and set the argument `smd_ci` to `"t"` and store the results in `res1`.
+
+::: {.content-visible unless-format="html"}
+```{r tost_primary}
+res1 <- t_TOST(
+  h_painscore120 ~ arm,
+  data,
+  low_eqbound = -1,
+  high_eqbound = Inf,
+  paired = FALSE,
+  alpha = 0.05,
+  smd_ci = "t",
+  var.equal = FALSE
+  )
+```
+:::
+
+b.  What is the lower and upper bound of the CI for the raw effect size?
+
+::: {.content-visible unless-format="html"}
+```{r}
+res1$effsize$upper.ci[1]
+res1$effsize$lower.ci[1]
+```
+:::
+
+c.  Plot the results.
+
+::: {.content-visible unless-format="html"}
+```{r}
+plot(res1, "simple")
+```
+:::
+
+d.  Would you conclude non-inferiority? Why?
+
+::: {.content-visible unless-format="html"}
+Answer: No, non-inferiority cannot be concluded because the lower bound of the confidence interval falls below the non-inferiority margin of 1.
+:::
+
+# Part 4: Equivalence testing
+
+Now you will simulate data for a two-arm trial comparing blood pressure between an intervention and control group.
+
+**Task 5:**
+
+a.  Simulate data for 40 participants per group, where blood pressure has a mean of 120 (SD = 5) in the intervention group and 122 (SD = 5) in the control group. Don't forget \`set.seed(1123)\`
+
+::: {.content-visible unless-format="html"}
+```{r}
+set.seed(1123)
+
+group <- rep(c('int', 'con'), each = 40)
+
+data2 <- data.frame(
+  group,
+  bp = if_else(group == "int", 
+               rnorm(80, 120, 5),
+               rnorm(80, 122, 5)
+))
+```
+:::
+
+b.  Perform a TOST procedure based on a two-sample t-test with unequal variances (Welch’s t-test), using an equivalence margin of ± 2 raw units. Set `smd_ci = "t"` to ensure the confidence interval is based on the t-distribution, and store the output in `res2`.
+
+::: {.content-visible unless-format="html"}
+```{r}
+res2 <- t_TOST(
+  bp ~ group,
+  data2,
+  eqb = 2,
+  paired = FALSE,
+  alpha = 0.05,
+  smd_ci = "t",
+  var.equal = FALSE
+  )
+```
+:::
+
+c.  Report the p-value that should be used for the TOST procedure: what value is taken as the TOST p-value?
+
+::: {.content-visible unless-format="html"}
+```{r}
+res2$TOST$p.value[3]
+```
+:::
+
+d.  What can you conclude based on this p-value? Use `plot()` to help interpret the TOST results if needed.
+
+::: {.content-visible unless-format="html"}
+Answer: We would not conclude equivalence because one of the two one-sided t-tests was not statistically significant, meaning the evidence is insufficient to support that the groups are equivalent within the chosen equivalence bounds.
+:::
+
+e.  Now simulate data using the same parameters as before, but increase the sample size to 100 per group, and store the resulting dataset as `data3`.
+
+::: {.content-visible unless-format="html"}
+```{r}
+set.seed(1123)
+
+group <- rep(c('int', 'con'), each = 100)
+
+data3 <- data.frame(
+  group,
+  bp = if_else(group == "int", 
+               rnorm(200, 120, 5),
+               rnorm(200, 122, 5)
+))
+```
+:::
+
+f.  Perform the TOST procedure using an equivalence margin of ± 2, and store the results in `res3`.
+
+::: {.content-visible unless-format="html"}
+```{r}
+res3 <- t_TOST(
+  bp ~ group,
+  data3,
+  eqb = 2,
+  paired = FALSE,
+  alpha = 0.05,
+  smd_ci = "t",
+  var.equal = FALSE
+  )
+```
+:::
+
+g.  Use `plot()` to visually assess the TOST results. What can you conclude based on the confidence interval?
+
+::: {.content-visible unless-format="html"}
+```{r}
+plot(res3, "simple")
+```
+:::
+
+::: {.content-visible unless-format="html"}
+Answer: We can conclude equivalence because the 90% CI lies within the equivalence bounds.
+:::
+
+# Part 5: Reflection
+
+Briefly explain (in ≤ 10 lines) when to use each of the following hypothesis tests: two-sided, one-sided (superiority or inferiority), non-inferiority, and equivalence.
+
+::: {.content-visible unless-format="html"}
+Answer:
+
+- **Two-sided tests** are used when you want to detect any difference (either higher or lower) or have no non-directional prediction. It aims to reject differences greater than 0 regardless of the direction.
+
+- **One-sided tests** are used when we have a directional prediction, either superior or inferior. It aims to reject differences larger (superiority) or smaller (inferiority) than 0.
+
+- **Non-inferiority tests** test whether an intervention is not worse than a standard by more than a predefined non-inferiority margin.
+
+- **Equivalence tests** aim to show two interventions are practically the same within a margin.
+:::
